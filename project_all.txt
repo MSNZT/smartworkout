@@ -1,0 +1,551 @@
+// ==========================================
+// ФАЙЛ: main.py
+// ==========================================
+
+from pathlib import Path
+from app.dotenv import load_dotenv
+
+if __name__ == "__main__":
+    env_path = Path(__file__).resolve().parent / ".env"
+    if not load_dotenv(str(env_path)):
+        raise SystemExit(f".env not found at {env_path}")
+
+    from app.logging_setup import setup_logger
+    from app.repositories.mongodb import init_mongo
+    from app.server import run
+
+    setup_logger()
+    init_mongo()
+    run()
+
+// ==========================================
+// ФАЙЛ: app/db.py
+// ==========================================
+
+from app.repositories.mongodb import get_db
+
+
+def ensure_collections():
+    db = get_db()
+
+    
+
+// ==========================================
+// ФАЙЛ: app/server.py
+// ==========================================
+
+import json
+import logging
+from http import HTTPStatus
+from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
+from urllib.parse import urlparse, parse_qs
+
+from app.httpresponse import Response, error_response
+from app import router
+import handlers
+
+MAX_BODY_SIZE = 1 * 1024 * 1024
+
+log = logging.getLogger(__name__)
+
+class HTTPRequestHandler(BaseHTTPRequestHandler):
+    protocol_version = "HTTP/1.1"
+
+    def _handle(self) -> None:
+        self._dispatch()
+
+    def _read_body(self):
+        length = int(self.headers.get("Content-Length") or 0)
+        if length > MAX_BODY_SIZE:
+            return None, error_response(
+                "request body too large", HTTPStatus.REQUEST_ENTITY_TOO_LARGE
+            )
+        
+        if length == 0:
+            return None, None
+        
+        try:
+            return json.loads(self.rfile.read(length)), None
+        except json.JSONDecodeError:
+            return None, error_response("invalid json body", HTTPStatus.BAD_REQUEST)
+
+    def _dispatch(self) -> int:
+        parsed = urlparse(self.path)
+        path = parsed.path
+        query = {k: v[0] for k, v in parse_qs(parsed.query).items()}
+
+        route, params, allowed = router.resolve(self.command, path)
+        if route is None:
+            status = (HTTPStatus.METHOD_NOT_ALLOWED if allowed else HTTPStatus.NOT_FOUND)
+            response = error_response(
+                "method not allowed" if allowed else "not found", status,
+            )
+
+            self._send(response)
+            return int(response.status)
+
+        body, err = self._read_body()
+        if err is not None:
+            if err.status == HTTPStatus.REQUEST_ENTITY_TOO_LARGE:
+                self.close_connection = True
+            self._send(err)
+            return int(err.status)
+
+        request = {
+            "method": self.command,
+            "path": path,
+            "query": query,
+            "headers": dict(self.headers),
+            "body": body,
+        }
+
+        result = route.handler(request, params)
+        
+        self._send(result)
+        return int(result.status)
+
+    def _send(self, response: Response) -> None:
+        payload = json.dumps(
+            response.body if response.body is not None else {},
+            ensure_ascii=False,
+        ).encode("utf-8")
+
+        self.send_response(response.status)
+        self.send_header("Content-Type", "application/json; charset=utf-8")
+        self.send_header("Content-Length", str(len(payload)))
+
+        for name, value in response.headers.items():
+            self.send_header(name, value)
+
+        self.end_headers()
+        self.wfile.write(payload)
+
+    do_GET = do_POST = do_PUT = do_PATCH = do_DELETE = _handle
+
+def run(port: int = 8000) -> None:
+    httpd = ThreadingHTTPServer(("", port), HTTPRequestHandler)
+    log.info("Starting HTTP server on port %d", port)
+    
+    try:
+        httpd.serve_forever()
+    except KeyboardInterrupt:
+        log.info("stopping server")
+        httpd.server_close()
+
+// ==========================================
+// ФАЙЛ: app/dotenv.py
+// ==========================================
+
+import os
+
+def load_dotenv(dotenv_path: str = ".env") -> bool:
+    if not os.path.exists(dotenv_path):
+        return False
+
+    with open(dotenv_path, "r", encoding="utf-8") as f:
+        for line in f:
+            line = line.strip()
+
+            if not line or line.startswith("#"):
+                continue
+
+            if "=" not in line:
+                continue
+
+            key, value = line.split("=", 1)
+            key = key.strip()
+            value = value.strip()
+
+            if len(value) >= 2 and value[0] == value[-1] and value[0] in ("'", '"'):
+                value = value[1:-1]
+
+            os.environ.setdefault(key, value)
+
+    return True
+
+// ==========================================
+// ФАЙЛ: app/context.py
+// ==========================================
+
+import contextvars
+import uuid
+
+request_id_var = contextvars.ContextVar("request_id", default="-")
+
+def new_request_id() -> str:
+    rid = uuid.uuid4().hex[:12]
+    request_id_var.set(rid)
+    return rid
+
+
+def get_request_id() -> str:
+    return request_id_var.get()
+
+// ==========================================
+// ФАЙЛ: app/app.py
+// ==========================================
+
+from router import Router
+from middlewares.logger import logging_middleware
+from middlewares.request_id import request_id_middleware
+
+router: Router = Router()
+router.use(request_id_middleware)
+router.use(logging_middleware)
+
+// ==========================================
+// ФАЙЛ: app/httpresponse.py
+// ==========================================
+
+from dataclasses import dataclass, field
+from http import HTTPStatus
+
+@dataclass
+class Response:
+    body: object = None
+    status: int = HTTPStatus.OK
+    headers: dict = field(default_factory=dict) 
+
+def json_response(data, status: int = HTTPStatus.OK) -> Response:
+    return Response(body=data, status=status)
+
+def error_response(data: str | dict, status: int = HTTPStatus.BAD_REQUEST) -> Response:
+    body = {"error": data} if isinstance(data, str) else data
+    return Response(body=body, status=status)
+
+// ==========================================
+// ФАЙЛ: app/router.py
+// ==========================================
+
+import re
+from dataclasses import dataclass, field
+from typing import Callable, Any
+
+_PARAM_RE = re.compile(r"\{(\w+)\}")
+
+Request = dict[str, Any]
+Params = dict[str, str]
+Handler = Callable[[Request, Params], Any]
+Middleware = Callable[[Request, Params, Handler], Any]
+
+def _compile_pattern(pattern: str) -> re.Pattern:
+    parts = _PARAM_RE.split(pattern)
+    out = []
+    for part in parts:
+        if not part:
+            continue
+        m = _PARAM_RE.fullmatch(part)
+        if m:
+            out.append(f"(?P<{m.group(1)}>[^/]+)")
+        else:
+            out.append(re.escape(part))
+    return re.compile("^" + "".join(out) + "$")
+
+@dataclass
+class Route:
+    method: str
+    pattern: str
+    handler: Callable
+    regex: re.Pattern = field(init=False)
+
+    def __post_init__(self):
+        self.method.upper()
+        self.regex = _compile_pattern(self.pattern)
+
+@dataclass
+class Router:
+    routes: list[Route] = field(default_factory=list)
+    global_middlewares: list[Callable] = field(default_factory=list)
+
+    def use(self, middleware: Callable):
+        self.global_middlewares.append(middleware)
+        return middleware
+
+    @staticmethod
+    def _wrap(middleware: Middleware, next_handler: Handler) -> Handler:
+        def wrapped(request: Request, params: Params):
+            return middleware(request, params, next_handler)
+
+        return wrapped
+
+    def _register(self, method: str, path: str, middlewares: tuple[Callable, ...]):
+        def decorator(handler: Callable):
+            all_mw = self.global_middlewares + list(middlewares)
+
+            wrapped_handler = handler
+
+            for mw in reversed(all_mw):
+                wrapped_handler = self._wrap(mw, wrapped_handler)
+
+            self.routes.append(Route(method, path, wrapped_handler))
+            return handler
+        return decorator
+
+    def resolve(self, method: str, path: str) -> tuple[Route | None, dict, bool]:
+        allowed = False
+
+        for route in self.routes:
+            match = route.regex.match(path)
+            if match is None:
+                continue
+
+            allowed = True
+            if route.method == method:
+                return route, match.groupdict(), True
+
+        return None, {}, allowed
+
+    def get(self, path: str, middlewares: tuple = ()):
+        return self._register("GET", path, middlewares)
+
+    def post(self, path: str, middlewares: tuple = ()):
+        return self._register("POST", path, middlewares)
+
+    def put(self, path: str, middlewares: tuple = ()):
+        return self._register("PUT", path, middlewares)
+
+    def delete(self, path: str, middlewares: tuple = ()):
+        return self._register("DELETE", path, middlewares)
+
+// ==========================================
+// ФАЙЛ: app/dependencies.py
+// ==========================================
+
+
+
+# _user_repo = UserRepository()
+# _auth_service = AuthService(user_repo=_user_repo)
+
+# def get_user_repo() -> UserRepository:
+#     return UserRepository()
+
+# def get_auth_service() -> AuthService:
+#     return AuthService(user_repo=get_user_repo())
+
+
+// ==========================================
+// ФАЙЛ: app/logging_setup.py
+// ==========================================
+
+import json
+import logging
+import sys
+from datetime import datetime, timezone
+from context import get_request_id
+
+
+class JsonFormatter(logging.Formatter):
+    def format(self, record):
+        now = datetime.now(timezone.utc).astimezone()
+        
+        log_record = {
+            "time": now.isoformat(timespec='microseconds'),
+            "level": record.levelname,
+            "msg": "http request completed"
+        }
+        
+        if isinstance(record.msg, dict):
+            log_record.update(record.msg)
+        else:
+            log_record["msg"] = record.getMessage()
+
+        try:
+            req_id = get_request_id()
+            if req_id and req_id != "-":
+                log_record["request_id"] = req_id
+        except Exception:
+            pass
+            
+        return json.dumps(log_record, ensure_ascii=False)
+
+
+log = logging.getLogger(__name__)
+
+def setup_logger(level=logging.INFO):
+    handler = logging.StreamHandler(sys.stdout)
+    handler.setFormatter(JsonFormatter())
+
+    root = logging.getLogger()
+    root.handlers.clear()
+    root.addHandler(handler)
+    root.setLevel(level)
+
+// ==========================================
+// ФАЙЛ: app/middlewares/logger.py
+// ==========================================
+
+import logging
+import time
+from http import HTTPStatus
+
+log = logging.getLogger(__name__)
+
+def logging_middleware(request, params, next_handler):
+    start = time.perf_counter()
+    try:
+        response = next_handler(request, params)
+    except Exception as e:
+        duration_ms = int((time.perf_counter() - start) * 1000)
+        log.error(
+            "Unhandled exception during request",
+            extra={
+                "method": request["method"],
+                "path": request["path"],
+                "status": int(HTTPStatus.INTERNAL_SERVER_ERROR),
+                "duration_ms": duration_ms,
+                "error": str(e),
+            },
+            exc_info=True,
+        )
+        raise
+
+    duration_ms = int((time.perf_counter() - start) * 1000)
+    data = {
+        "method": request["method"],
+        "path": request["path"],
+        "status": int(response.status),
+        "duration_ms": duration_ms,
+    }
+
+    if response.status == HTTPStatus.NOT_FOUND:
+        log.warning(data)
+    elif response.status >= 500:
+        log.error(data)
+    else:
+        log.info(data)
+
+    return response
+
+// ==========================================
+// ФАЙЛ: app/middlewares/request_id.py
+// ==========================================
+
+from app.context import new_request_id, get_request_id
+
+def request_id_middleware(request, params, next_handler):
+    new_request_id()
+    response = next_handler(request, params)
+    response.headers["X-Request-Id"] = get_request_id()
+    return response
+
+// ==========================================
+// ФАЙЛ: app/repositories/mongodb.py
+// ==========================================
+
+import logging
+import os
+
+from pymongo import MongoClient
+
+logger = logging.getLogger(__name__)
+
+_client = None
+_db = None
+
+
+def _get_int_env(name: str, default: int) -> int:
+    raw = os.getenv(name)
+    if raw is None or raw == "":
+        return default
+    try:
+        return int(raw)
+    except ValueError as e:
+        raise ValueError(f"Configuration error: {name} must be an integer") from e
+
+
+def init_mongo():
+    global _client, _db
+    if _client is not None:
+        return _db
+
+    mongo_uri = os.getenv("MONGO_URI")
+    db_name = os.getenv("MONGO_DB_NAME")
+
+    if not mongo_uri:
+        raise ValueError("Configuration error: MONGO_URI is missing or empty")
+    if not db_name:
+        raise ValueError("Configuration error: MONGO_DB_NAME is missing or empty")
+
+    max_pool_size = _get_int_env("MONGO_MAX_POOL_SIZE", 100)
+    min_pool_size = _get_int_env("MONGO_MIN_POOL_SIZE", 0)
+    max_idle_ms = _get_int_env("MONGO_MAX_IDLE_TIME_MS", 60000)
+    wait_timeout_ms = _get_int_env("MONGO_WAIT_QUEUE_TIMEOUT_MS", 10000)
+
+    if max_pool_size <= 0:
+        raise ValueError("Configuration error: MONGO_MAX_POOL_SIZE must be > 0")
+    if min_pool_size < 0:
+        raise ValueError("Configuration error: MONGO_MIN_POOL_SIZE must be >= 0")
+    if min_pool_size > max_pool_size:
+        raise ValueError(
+            "Configuration error: MONGO_MIN_POOL_SIZE cannot be greater than MONGO_MAX_POOL_SIZE"
+        )
+    if max_idle_ms < 0:
+        raise ValueError("Configuration error: MONGO_MAX_IDLE_TIME_MS must be >= 0")
+    if wait_timeout_ms <= 0:
+        raise ValueError("Configuration error: MONGO_WAIT_QUEUE_TIMEOUT_MS must be > 0")
+
+    try:
+        _client = MongoClient(
+            mongo_uri,
+            maxPoolSize=max_pool_size,
+            minPoolSize=min_pool_size,
+            maxIdleTimeMS=max_idle_ms,
+            waitQueueTimeoutMS=wait_timeout_ms,
+            serverSelectionTimeoutMS=5000,
+        )
+        _db = _client[db_name]
+        _client.admin.command("ping")
+
+        logger.info({
+            "event": "mongodb_connection_success",
+            "msg": "Successfully connected to MongoDB database",
+            "database": db_name,
+        })
+        return _db
+
+    except Exception as e:
+        logger.error({
+            "event": "mongodb_connection_error",
+            "msg": f"Failed to connect to MongoDB: {e}",
+        }, exc_info=True)
+        raise
+
+
+def get_db():
+    if _db is None:
+        raise RuntimeError("mongo database is not initialized")
+    return _db
+
+// ==========================================
+// ФАЙЛ: app/dtos/auth.py
+// ==========================================
+
+import re
+from dataclasses import dataclass
+
+EMAIL_RE = re.compile(r"^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$")
+
+@dataclass
+class RegisterDTO:
+    email: str
+    password: str
+    confirm_password: str
+
+    def __post_init__(self):
+        if not isinstance(self.email, str):
+            raise ValueError("email must be a string")
+        if not isinstance(self.password, str):
+            raise ValueError("password must be a string")
+
+        self.email = self.email.strip().lower()
+        self.password = self.password.strip()
+        
+        if not EMAIL_RE.match(self.email):
+            raise ValueError("invalid email")
+        if len(self.password) < 8:
+            raise ValueError("password too short, min length 8")
+        if len(self.confirm_password) < 8:
+            raise ValueError("confirm_password too short, min length 8")
+        if self.password != self.confirm_password:
+            raise ValueError("passwords don't match")
+

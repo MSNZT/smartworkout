@@ -1,0 +1,4 @@
+dnspython==2.8.0
+pymongo==4.18.1
+
+contextvars
