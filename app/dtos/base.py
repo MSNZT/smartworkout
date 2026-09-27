@@ -29,6 +29,12 @@ class BaseDTO:
                 errors.append({"field": f.name, "message": f"{f.name} cannot be blank"})
                 continue
 
+            validator = getattr(self, f"_validate_{f.name}", None)
+            if validator:
+                message = validator(value)
+                if message:
+                    errors.append({"field": f.name, "message": message})
+
 
         if errors:
             raise DTOValidationError(errors)
