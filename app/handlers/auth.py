@@ -6,13 +6,13 @@ from app.dependencies import auth_service
 from app.dtos.auth import LoginDTO, RegisterDTO
 from app.dtos.base import DTOValidationError
 from app.httpresponse import error_response, json_response
-from app.middlewares.auth import require_auth, require_admin
 from app.routing import router
-
 
 @router.post("/auth/register")
 def register(request, params):
     body = request.get("body") or {}
+
+    print(request)
 
     try:
         dto = RegisterDTO(email=body.get("email"), password=body.get("password"))
@@ -40,7 +40,6 @@ def register(request, params):
         HTTPStatus.CREATED,
     )
 
-# middlewares=[require_auth, require_admin]
 @router.post("/auth/login")
 def login(request, params):
     body = request.get("body") or {}
