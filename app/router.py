@@ -13,12 +13,9 @@ Middleware = Callable[[Request, Params, Handler], Any]
 def _compile_pattern(pattern: str) -> re.Pattern:
     parts = _PARAM_RE.split(pattern)
     out = []
-    for part in parts:
-        if not part:
-            continue
-        m = _PARAM_RE.fullmatch(part)
-        if m:
-            out.append(f"(?P<{m.group(1)}>[^/]+)")
+    for i, part in enumerate(parts):
+        if i % 2 == 1:
+            out.append(f"(?P<{part}>[^/]+)")
         else:
             out.append(re.escape(part))
     return re.compile("^" + "".join(out) + "$")
