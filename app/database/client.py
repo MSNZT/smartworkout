@@ -1,6 +1,7 @@
 import logging
-import os
 import time
+
+from app.core.config import settings
 
 from pymongo import MongoClient
 from pymongo.database import Database
@@ -11,34 +12,15 @@ logger = logging.getLogger(__name__)
 _client: MongoClient | None = None
 _db: Database | None = None
 
-
-def _get_int_env(name: str, default: int) -> int:
-    raw = os.getenv(name)
-    if raw is None or raw == "":
-        return default
-    try:
-        return int(raw)
-    except ValueError as e:
-        raise ValueError(f"Configuration error: {name} must be an integer") from e
-
-
 def init_db():
     global _client, _db
     if _client is not None:
         return _db
 
-    mongo_uri = os.getenv("MONGO_URI")
-    db_name = os.getenv("MONGO_DB_NAME")
-
-    if not mongo_uri:
-        raise ValueError("Configuration error: MONGO_URI is missing or empty")
-    if not db_name:
-        raise ValueError("Configuration error: MONGO_DB_NAME is missing or empty")
-
-    max_pool_size = _get_int_env("MONGO_MAX_POOL_SIZE", 100)
-    min_pool_size = _get_int_env("MONGO_MIN_POOL_SIZE", 0)
-    max_idle_ms = _get_int_env("MONGO_MAX_IDLE_TIME_MS", 60000)
-    wait_timeout_ms = _get_int_env("MONGO_WAIT_QUEUE_TIMEOUT_MS", 10000)
+    max_pool_size = settings.mongo_max_pool_size
+    min_pool_size = settings.mongo_min_pool_size
+    max_idle_ms = settings.mongo_max_idle_ms
+    wait_timeout_ms = settings.mongo_wait_timeout_ms
 
     if max_pool_size <= 0:
         raise ValueError("Configuration error: MONGO_MAX_POOL_SIZE must be > 0")
@@ -56,7 +38,7 @@ def init_db():
     max_attempts = 5
 
     _client = MongoClient(
-        mongo_uri,
+        settings.mongo_uri,
         maxPoolSize=max_pool_size,
         minPoolSize=min_pool_size,
         maxIdleTimeMS=max_idle_ms,
@@ -71,13 +53,13 @@ def init_db():
 
     for attempt in range(1, max_attempts + 1):
         try:
-            _db = _client[db_name]
+            _db = _client[settings.mongo_db]
             _client.admin.command("ping")
 
             logger.info({
                 "event": "mongodb_connection_success",
                 "msg": "Successfully connected to MongoDB database",
-                "database": db_name,
+                "database": settings.mongo_db,
             })
             return _db
 
