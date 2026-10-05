@@ -86,6 +86,18 @@ class ExerciseDTOTests(unittest.TestCase):
             with self.subTest(value=value):
                 self.assert_invalid(self.dto.ExerciseUpdateDTO, 'video_url', {'video_url': value})
 
+    def test_uri_components(self):
+        valid = ('https://[::1]:8000/a%5Bb%5D?x=/?:@#part', 'https://user:pass@example.org:443/video', 'urn:example:video', 'mailto:trainer@example.org')
+        invalid = ('https://example.org:abc/video', 'https://example.org/video#part#other', 'https://example.org/[video]', 'https://user@@example.org/video', 'https://example.org?q=[video]')
+        for field in ('video_url', 'image_url'):
+            for value in valid:
+                with self.subTest(field=field, value=value):
+                    self.assertEqual(self.dto.ExerciseUpdateDTO(**{field: value}).to_document().get(field), value)
+            for value in invalid:
+                with self.subTest(field=field, value=value):
+                    self.assert_invalid(self.dto.ExerciseUpdateDTO, field, {field: value})
+                    self.assert_invalid(self.dto.ExerciseCreateDTO, field, {**self.valid_data(), field: value})
+
     def test_query_validation(self):
         self.assertEqual(self.dto.ExerciseListDTO().limit, 20)
         for value in ('1', '100'):

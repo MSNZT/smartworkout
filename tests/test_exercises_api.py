@@ -107,6 +107,20 @@ class ExerciseAPITests(unittest.TestCase):
                     self.assertTrue(error.get('message').isascii())
         self.assertEqual(self.db.exercises.count_documents({}), 0)
 
+    def test_invalid_uri_components_are_rejected_on_create_and_update(self):
+        doc = self.seed(video_url='urn:example:video', image_url='https://example.org/image')
+        path = '/exercises/' + str(doc.get('_id'))
+        before = self.api.request('GET', path)[1]
+        for field in ('video_url', 'image_url'):
+            for value in ('https://example.org:abc/video', 'https://example.org/video#part#other', 'https://example.org/[video]'):
+                for method, url, payload in (('POST', '/exercises', self.values(**{field: value})), ('PUT', path, {field: value})):
+                    with self.subTest(field=field, value=value, method=method):
+                        status, body, _ = self.api.request(method, url, payload=payload)
+                        self.assertEqual(status, 400)
+                        self.assertIn(field, [error.get('field') for error in body.get('errors')])
+        self.assertEqual(self.api.request('GET', path)[1], before)
+        self.assertEqual(self.db.exercises.count_documents({}), 1)
+
     def test_unknown_body_keys_cannot_override_server_fields(self):
         forced_id = '507f1f77bcf86cd799439011'
         status, body, _ = self.api.request('POST', '/exercises', payload=self.values(_id=forced_id, created_at='yesterday', extra='ignored'))
@@ -176,6 +190,15 @@ class ExerciseAPITests(unittest.TestCase):
         self.seed(name='Other', description='Жим лёжа')
         for search, names in (('.*', ['Literal .* exercise']), ('жим', ['Other']), ('[', [])):
             with self.subTest(search=search):
+                status, body, _ = self.api.request('GET', '/exercises?' + urlencode({'search': search}))
+                self.assertEqual(status, 200)
+                self.assertEqual([item.get('name') for item in body.get('data')], names)
+
+    def test_search_handles_nul_and_overlong_literal(self):
+        self.seed(name='Contains\x00value')
+        self.seed(name='Other', description='x' * 500)
+        for search, names in (('\x00', ['Contains\x00value']), ('x' * 40000, [])):
+            with self.subTest(search_length=len(search)):
                 status, body, _ = self.api.request('GET', '/exercises?' + urlencode({'search': search}))
                 self.assertEqual(status, 200)
                 self.assertEqual([item.get('name') for item in body.get('data')], names)

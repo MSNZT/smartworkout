@@ -2,7 +2,7 @@ import logging
 
 from .client import get_db
 from .collections import EXERCISES, USERS
-from app.dtos.exercises import EQUIPMENT, MUSCLE_GROUPS
+from app.dtos.exercises import DESCRIPTION_MAX_LENGTH, EQUIPMENT, MUSCLE_GROUPS, NAME_MAX_LENGTH
 
 logger = logging.getLogger(__name__)
 
@@ -13,8 +13,8 @@ VALIDATORS = {
             "required": ["name", "muscle_groups", "equipment", "created_at"],
             "properties": {
                 "_id": {"bsonType": "objectId"},
-                "name": {"bsonType": "string", "minLength": 1, "maxLength": 100},
-                "description": {"bsonType": "string", "maxLength": 500},
+                "name": {"bsonType": "string", "minLength": 1, "maxLength": NAME_MAX_LENGTH},
+                "description": {"bsonType": "string", "maxLength": DESCRIPTION_MAX_LENGTH},
                 "muscle_groups": {
                     "bsonType": "array", "minItems": 1,
                     "items": {"bsonType": "string", "enum": list(MUSCLE_GROUPS)},

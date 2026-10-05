@@ -6,7 +6,7 @@ from pymongo import ASCENDING, ReturnDocument
 from pymongo.database import Database
 
 from app.database.collections import EXERCISES, PROGRAMS
-from app.dtos.exercises import ExerciseListDTO
+from app.dtos.exercises import DESCRIPTION_MAX_LENGTH, NAME_MAX_LENGTH, ExerciseListDTO
 
 
 class ExerciseRepository:
@@ -30,7 +30,11 @@ class ExerciseRepository:
         if filters.equipment is not None:
             query['equipment'] = {'$in': filters.equipment}
         if filters.search is not None:
-            pattern = {'$regex': re.escape(filters.search), '$options': 'i'}
+            # A longer literal cannot occur in either bounded searchable field.
+            if len(filters.search) > max(NAME_MAX_LENGTH, DESCRIPTION_MAX_LENGTH):
+                return []
+            escaped_search = re.escape(filters.search).replace('\x00', r'\x00')
+            pattern = {'$regex': escaped_search, '$options': 'i'}
             query['$or'] = [{'name': pattern}, {'description': pattern}]
         if filters.cursor is not None:
             query['_id'] = {'$gt': filters.cursor}

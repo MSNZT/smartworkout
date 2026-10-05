@@ -10,9 +10,20 @@ from app.dtos.base import DTOValidationError
 
 MUSCLE_GROUPS = ('CHEST', 'BACK', 'LEGS', 'ARMS', 'SHOULDERS', 'CORE', 'FULL_BODY')
 EQUIPMENT = ('BARBELL', 'DUMBBELL', 'MACHINE', 'BODYWEIGHT', 'KETTLEBELL', 'RESISTANCE_BAND', 'OTHER')
+NAME_MAX_LENGTH = 100
+DESCRIPTION_MAX_LENGTH = 500
 UNSET = object()
 _ID_PATTERN = re.compile(r'[a-fA-F0-9]{24}')
 _URI_PATTERN = re.compile(r"[A-Za-z][A-Za-z0-9+.-]*:[A-Za-z0-9\-._~:/?#\[\]@!$&'()*+,;=%]*")
+# Component character sets follow RFC 3986, Appendix A.
+_URI_CHARS = r"A-Za-z0-9\-._~!$&'()*+,;="
+_URI_PATH = re.compile(rf'[{_URI_CHARS}%:@/]*')
+_URI_QUERY_FRAGMENT = re.compile(rf'[{_URI_CHARS}%:@/?]*')
+_URI_AUTHORITY = re.compile(
+    rf'(?:[{_URI_CHARS}%:]*@)?'
+    rf'(?:\[(?:[a-fA-F0-9:.]+|[vV][a-fA-F0-9]+\.[{_URI_CHARS}:]+)\]|[{_URI_CHARS}%]*)'
+    r'(?::[0-9]*)?'
+)
 
 
 def validate_exercise_id(value: str) -> ObjectId:
@@ -35,10 +46,15 @@ def _valid_uri(value: str) -> bool:
     if not _URI_PATTERN.fullmatch(value) or re.search(r'%(?![a-fA-F0-9]{2})', value):
         return False
     try:
-        urlsplit(value)
+        parts = urlsplit(value)
     except ValueError:
         return False
-    return True
+    return all((
+        _URI_AUTHORITY.fullmatch(parts.netloc),
+        _URI_PATH.fullmatch(parts.path),
+        _URI_QUERY_FRAGMENT.fullmatch(parts.query),
+        _URI_QUERY_FRAGMENT.fullmatch(parts.fragment),
+    ))
 
 
 @dataclass
@@ -69,9 +85,9 @@ class _ExerciseDTO:
             elif name == 'name':
                 value = value.strip()
                 self.name = value
-                message = 'name cannot be blank' if not value else ('name must be at most 100 characters' if len(value) > 100 else None)
+                message = 'name cannot be blank' if not value else (f'name must be at most {NAME_MAX_LENGTH} characters' if len(value) > NAME_MAX_LENGTH else None)
             elif name == 'description':
-                message = 'description must be at most 500 characters' if len(value) > 500 else None
+                message = f'description must be at most {DESCRIPTION_MAX_LENGTH} characters' if len(value) > DESCRIPTION_MAX_LENGTH else None
             else:
                 message = None if _valid_uri(value) else f'{name} must be a valid URI'
             if message:
