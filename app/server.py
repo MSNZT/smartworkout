@@ -114,6 +114,13 @@ class HTTPRequestHandler(BaseHTTPRequestHandler):
         return int(result.status)
 
     def _send(self, response: Response) -> None:
+        if response.status == HTTPStatus.NO_CONTENT:
+            self.send_response(response.status)
+            for name, value in response.headers:
+                self.send_header(name, value)
+            self.end_headers()
+            return
+
         payload = json.dumps(
             response.body
             if response.body is not None
