@@ -11,3 +11,9 @@ user_service = UserService(user_repo)
 auth_service = AuthService(
     user_service=user_service,
 )
+
+from app.repositories.favorite import FavoriteRepository
+from app.services.favorite.service import FavoriteService
+
+favorite_repo = FavoriteRepository(db)
+favorite_service = FavoriteService(favorite_repo)
