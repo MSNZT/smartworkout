@@ -19,8 +19,8 @@ class FavoriteRepository:
     def get_programs_by_ids(self, program_ids: list) -> list[dict]:
         return list(self.programs.find({"_id": {"$in": program_ids}}))
 
-    def program_exists(self, program_id) -> bool:
-        return self.programs.find_one({"_id": program_id}, {"_id": 1}) is not None
+    def get_program(self, program_id) -> dict | None:
+        return self.programs.find_one({"_id": program_id})
 
     def is_in_favorites(self, user_id, program_id) -> bool:
         user = self.users.find_one(

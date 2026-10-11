@@ -1,6 +1,11 @@
 from bson import ObjectId
 
-from app.errors.favorite import InvalidProgramIdError, ProgramNotFoundError
+from app.errors.favorite import (
+    InvalidProgramIdError,
+    ProgramNotFoundError,
+    AlreadyInFavoritesError,
+    ProgramNotInFavoritesError,
+)
 from app.repositories.favorite import FavoriteRepository
 
 
@@ -16,20 +21,46 @@ class FavoriteService:
             return []
 
         programs = self.favorite_repo.get_programs_by_ids(favorite_ids)
-        for program in programs:
-            program["_id"] = str(program["_id"])
-        return programs
+        return [self._to_short_view(p) for p in programs]
 
     def add_to_favorites(self, user_id: str, program_id: str) -> None:
+        user_obj_id = ObjectId(user_id)
         program_obj_id = ObjectId(program_id)
 
-        if not self.favorite_repo.program_exists(program_obj_id):
+        program = self.favorite_repo.get_program(program_obj_id)
+        if not program:
             raise ProgramNotFoundError()
 
-        self.favorite_repo.add_to_favorites(ObjectId(user_id), program_obj_id)
+        # Проверка: программа должна быть публичной и не своей
+        author_id = program.get("author_id")
+        is_own = author_id is not None and ObjectId(author_id) == user_obj_id
+        if not program.get("is_public") or is_own:
+            raise ProgramNotFoundError()
+
+        if self.favorite_repo.is_in_favorites(user_obj_id, program_obj_id):
+            raise AlreadyInFavoritesError()
+
+        self.favorite_repo.add_to_favorites(user_obj_id, program_obj_id)
 
     def remove_from_favorites(self, user_id: str, program_id: str) -> None:
         if not ObjectId.is_valid(program_id):
             raise InvalidProgramIdError()
 
-        self.favorite_repo.remove_from_favorites(ObjectId(user_id), ObjectId(program_id))
+        user_obj_id = ObjectId(user_id)
+        program_obj_id = ObjectId(program_id)
+
+        if not self.favorite_repo.is_in_favorites(user_obj_id, program_obj_id):
+            raise ProgramNotInFavoritesError()
+
+        self.favorite_repo.remove_from_favorites(user_obj_id, program_obj_id)
+
+    @staticmethod
+    def _to_short_view(program: dict) -> dict:
+        return {
+            "id": str(program["_id"]),
+            "title": program.get("title", ""),
+            "description": program.get("description", ""),
+            "author_id": str(program["author_id"]) if program.get("author_id") else None,
+            "is_public": program.get("is_public", False),
+            "difficulty": program.get("difficulty"),
+        }

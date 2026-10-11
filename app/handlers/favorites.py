@@ -9,24 +9,23 @@ from app.dependencies import favorite_service
 
 
 @router.get("/me/favorites", middlewares=[require_auth])
-def get_favorites(request, params):
+def get_favorites(request):
     user = request["user"]
     programs = favorite_service.get_favorites(user["id"])
     return json_response(programs, HTTPStatus.OK)
 
 
 @router.post("/me/favorites", middlewares=[require_auth])
-def add_to_favorites(request, params):
+def add_to_favorites(request):
     user = request["user"]
-    body = request.get("body") or {}
 
     try:
-        dto = FavoriteDTO(program_id=body.get("program_id"))
+        dto = FavoriteDTO.from_dict(request.get("body"))
     except DTOValidationError as exc:
         return error_response(
             {
                 "code": "BAD_REQUEST",
-                "message": "validation failed",
+                "message": "Validation failed",
                 "errors": exc.errors,
             },
             HTTPStatus.BAD_REQUEST,
@@ -37,9 +36,9 @@ def add_to_favorites(request, params):
 
 
 @router.delete("/me/favorites/{program_id}", middlewares=[require_auth])
-def remove_from_favorites(request, params):
+def remove_from_favorites(request):
     user = request["user"]
-    program_id = params.get("program_id")
+    program_id = request["params"]["program_id"]
 
     favorite_service.remove_from_favorites(user["id"], program_id)
     return json_response({"status": "success"}, HTTPStatus.OK)

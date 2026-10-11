@@ -19,6 +19,14 @@ class ProgramNotFoundError(AppError):
         super().__init__(message)
 
 
+class AlreadyInFavoritesError(AppError):
+    status = HTTPStatus.CONFLICT
+    code = "CONFLICT"
+
+    def __init__(self, message: str = "program already in favorites"):
+        super().__init__(message)
+
+
 class ProgramNotInFavoritesError(AppError):
     status = HTTPStatus.NOT_FOUND
     code = "NOT_FOUND"
