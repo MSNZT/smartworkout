@@ -4,6 +4,9 @@ from app.database import get_db
 
 from pymongo.database import Database
 
+from app.repositories.favorite import FavoriteRepository
+from app.services.favorite.service import FavoriteService
+
 db: Database = get_db()
 
 exercise_repo = ExerciseRepository(db)
@@ -14,3 +17,6 @@ user_service = UserService(user_repo)
 auth_service = AuthService(
     user_service=user_service,
 )
+
+favorite_repo = FavoriteRepository(db)
+favorite_service = FavoriteService(favorite_repo)
