@@ -22,13 +22,6 @@ class FavoriteRepository:
     def get_program(self, program_id) -> dict | None:
         return self.programs.find_one({"_id": program_id})
 
-    def is_in_favorites(self, user_id, program_id) -> bool:
-        user = self.users.find_one(
-            {"_id": user_id, "favorite_program_ids": program_id},
-            {"_id": 1},
-        )
-        return user is not None
-
     def add_to_favorites(self, user_id, program_id) -> bool:
         result = self.users.update_one(
             {"_id": user_id, "favorite_program_ids": {"$ne": program_id}},
@@ -36,8 +29,9 @@ class FavoriteRepository:
         )
         return result.modified_count > 0
 
-    def remove_from_favorites(self, user_id, program_id) -> None:
-        self.users.update_one(
-            {"_id": user_id},
+    def remove_from_favorites(self, user_id, program_id) -> bool:
+        result = self.users.update_one(
+            {"_id": user_id, "favorite_program_ids": program_id},
             {"$pull": {"favorite_program_ids": program_id}},
         )
+        return result.modified_count > 0

@@ -51,10 +51,10 @@ class FavoriteService:
         user_obj_id = ObjectId(user_id)
         program_obj_id = ObjectId(program_id)
 
-        if not self.favorite_repo.is_in_favorites(user_obj_id, program_obj_id):
-            raise ProgramNotInFavoritesError()
+        removed = self.favorite_repo.remove_from_favorites(user_obj_id, program_obj_id)
 
-        self.favorite_repo.remove_from_favorites(user_obj_id, program_obj_id)
+        if not removed:
+            raise ProgramNotInFavoritesError()
 
     @staticmethod
     def _to_short_view(program: dict) -> dict:

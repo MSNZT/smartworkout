@@ -79,7 +79,7 @@ def test_add_to_favorites_already_exists(service, mock_repo, user_id, program_id
 # --- Тесты для remove_from_favorites ---
 
 def test_remove_from_favorites_success(service, mock_repo, user_id, program_id):
-    mock_repo.is_in_favorites.return_value = True  # Программа есть в избранном
+    mock_repo.remove_from_favorites.return_value = True
 
     service.remove_from_favorites(user_id, program_id)
 
@@ -92,7 +92,7 @@ def test_remove_from_favorites_invalid_id(service, user_id):
 
 
 def test_remove_from_favorites_not_in_list(service, mock_repo, user_id, program_id):
-    mock_repo.is_in_favorites.return_value = False  # Программы нет в избранном
+    mock_repo.remove_from_favorites.return_value = False  # Нечего удалять
 
     with pytest.raises(ProgramNotInFavoritesError):
         service.remove_from_favorites(user_id, program_id)
