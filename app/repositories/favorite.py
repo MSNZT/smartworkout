@@ -1,3 +1,4 @@
+from bson import ObjectId
 from pymongo.database import Database
 from pymongo.collection import Collection
 
@@ -16,8 +17,12 @@ class FavoriteRepository:
         )
         return user.get("favorite_program_ids", []) if user else []
 
-    def get_programs_by_ids(self, program_ids: list) -> list[dict]:
-        return list(self.programs.find({"_id": {"$in": program_ids}}))
+    def get_programs_by_ids(self, program_ids: list, limit: int, cursor: ObjectId | None = None) -> list[dict]:
+        query = {"_id": {"$in": program_ids}}
+        if cursor:
+            query["_id"] = {"$in": program_ids, "$lt": cursor}
+
+        return list(self.programs.find(query).sort("_id", -1).limit(limit))
 
     def get_program(self, program_id) -> dict | None:
         return self.programs.find_one({"_id": program_id})

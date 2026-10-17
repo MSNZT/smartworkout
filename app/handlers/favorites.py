@@ -1,3 +1,5 @@
+from bson import ObjectId
+from app.common.pagination import parse_limit
 from app.httpresponse import Response
 from http import HTTPStatus
 
@@ -12,8 +14,33 @@ from app.dependencies import favorite_service
 @router.get("/me/favorites", middlewares=[require_auth])
 def get_favorites(request):
     user = request["user"]
-    programs = favorite_service.get_favorites(user["id"])
-    return json_response(programs, HTTPStatus.OK)
+    query = request.get("query") or {}
+
+    try:
+        limit = parse_limit(query.get("limit", 20))
+    except ValueError as exc:
+        return error_response(
+            {"code": "BAD_REQUEST", "message": str(exc)},
+            HTTPStatus.BAD_REQUEST
+        )
+
+    cursor_str = query.get("cursor")
+    cursor = None
+    if cursor_str:
+        if not ObjectId.is_valid(cursor_str):
+            return error_response(
+                {"code": "BAD_REQUEST", "message": "invalid cursor"},
+                HTTPStatus.BAD_REQUEST
+            )
+        cursor = ObjectId(cursor_str)
+
+    page = favorite_service.get_favorites(user["id"], limit, cursor)
+
+    return json_response({
+        "data": page.data,
+        "next": page.next,
+        "has_more": page.has_more,
+    }, HTTPStatus.OK)
 
 
 @router.post("/me/favorites", middlewares=[require_auth])

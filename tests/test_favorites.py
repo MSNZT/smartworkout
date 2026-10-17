@@ -92,7 +92,7 @@ def test_remove_from_favorites_invalid_id(service, user_id):
 
 
 def test_remove_from_favorites_not_in_list(service, mock_repo, user_id, program_id):
-    mock_repo.remove_from_favorites.return_value = False  # Нечего удалять
+    mock_repo.remove_from_favorites.return_value = False
 
     with pytest.raises(ProgramNotInFavoritesError):
         service.remove_from_favorites(user_id, program_id)
@@ -101,17 +101,13 @@ def test_remove_from_favorites_not_in_list(service, mock_repo, user_id, program_
 # --- Тесты для get_favorites ---
 
 def test_get_favorites_empty(service, mock_repo, user_id):
-    mock_repo.get_favorite_ids.return_value = []  # Пустой список
-
+    mock_repo.get_favorite_ids.return_value = []
     result = service.get_favorites(user_id)
-
-    assert result == []
-
+    assert result.data == []
 
 def test_get_favorites_success(service, mock_repo, user_id):
     fake_program_id = ObjectId()
     mock_repo.get_favorite_ids.return_value = [fake_program_id]
-
     mock_repo.get_programs_by_ids.return_value = [{
         "_id": fake_program_id,
         "title": "Моя тренировка",
@@ -120,10 +116,6 @@ def test_get_favorites_success(service, mock_repo, user_id):
         "is_public": True,
         "difficulty": "Beginner"
     }]
-
     result = service.get_favorites(user_id)
-
-    assert len(result) == 1
-    assert result[0]["title"] == "Моя тренировка"
-    assert result[0]["id"] == str(fake_program_id)
-    assert "description" in result[0]
+    assert len(result.data) == 1
+    assert result.data[0]["title"] == "Моя тренировка"

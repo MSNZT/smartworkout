@@ -1,3 +1,4 @@
+from app.common.pagination import PaginationParams, paginate, Page
 from bson import ObjectId
 
 from app.errors.favorite import (
@@ -14,15 +15,22 @@ class FavoriteService:
     def __init__(self, favorite_repo: FavoriteRepository):
         self.favorite_repo = favorite_repo
 
-    def get_favorites(self, user_id: str) -> list[dict]:
+    def get_favorites(self, user_id: str, limit: int = 20, cursor: ObjectId | None = None) -> Page[dict]:
         user_obj_id = ObjectId(user_id)
         favorite_ids = self.favorite_repo.get_favorite_ids(user_obj_id)
 
         if not favorite_ids:
-            return []
+            return Page(data=[], next=None, limit=limit, has_more=False)
 
-        programs = self.favorite_repo.get_programs_by_ids(favorite_ids)
-        return [self._to_short_view(p) for p in programs]
+        programs = self.favorite_repo.get_programs_by_ids(favorite_ids, limit + 1, cursor)
+
+        params = PaginationParams(limit=limit, cursor=cursor)
+
+        page = paginate(programs, params, key=lambda p: p["_id"])
+
+        page.data = [self._to_short_view(p) for p in page.data]
+
+        return page
 
     def add_to_favorites(self, user_id: str, program_id: str) -> None:
         user_obj_id = ObjectId(user_id)
