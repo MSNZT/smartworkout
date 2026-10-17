@@ -29,11 +29,12 @@ class FavoriteRepository:
         )
         return user is not None
 
-    def add_to_favorites(self, user_id, program_id) -> None:
-        self.users.update_one(
-            {"_id": user_id},
-            {"$addToSet": {"favorite_program_ids": program_id}},
+    def add_to_favorites(self, user_id, program_id) -> bool:
+        result = self.users.update_one(
+            {"_id": user_id, "favorite_program_ids": {"$ne": program_id}},
+            {"$push": {"favorite_program_ids": program_id}}
         )
+        return result.modified_count > 0
 
     def remove_from_favorites(self, user_id, program_id) -> None:
         self.users.update_one(

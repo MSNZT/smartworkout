@@ -33,3 +33,11 @@ class ProgramNotInFavoritesError(AppError):
 
     def __init__(self, message: str = "program not found in favorites"):
         super().__init__(message)
+
+
+class ForbiddenError(AppError):
+    status = HTTPStatus.FORBIDDEN
+    code = "FORBIDDEN"
+
+    def __init__(self, message: str = "forbidden"):
+        super().__init__(message)

@@ -1,3 +1,4 @@
+from app.httpresponse import Response
 from http import HTTPStatus
 
 from app.dtos.favorite import FavoriteDTO
@@ -39,6 +40,6 @@ def add_to_favorites(request):
 def remove_from_favorites(request):
     user = request["user"]
     program_id = request["params"]["program_id"]
-
     favorite_service.remove_from_favorites(user["id"], program_id)
-    return json_response({"status": "success"}, HTTPStatus.OK)
+
+    return Response(status=HTTPStatus.NO_CONTENT)

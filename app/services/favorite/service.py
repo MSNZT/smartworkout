@@ -5,6 +5,7 @@ from app.errors.favorite import (
     ProgramNotFoundError,
     AlreadyInFavoritesError,
     ProgramNotInFavoritesError,
+    ForbiddenError,
 )
 from app.repositories.favorite import FavoriteRepository
 
@@ -31,16 +32,17 @@ class FavoriteService:
         if not program:
             raise ProgramNotFoundError()
 
-        # Проверка: программа должна быть публичной и не своей
         author_id = program.get("author_id")
         is_own = author_id is not None and ObjectId(author_id) == user_obj_id
-        if not program.get("is_public") or is_own:
+
+        if is_own:
+            raise ForbiddenError()
+        if not program.get("is_public"):
             raise ProgramNotFoundError()
 
-        if self.favorite_repo.is_in_favorites(user_obj_id, program_obj_id):
+        added = self.favorite_repo.add_to_favorites(user_obj_id, program_obj_id)
+        if not added:
             raise AlreadyInFavoritesError()
-
-        self.favorite_repo.add_to_favorites(user_obj_id, program_obj_id)
 
     def remove_from_favorites(self, user_id: str, program_id: str) -> None:
         if not ObjectId.is_valid(program_id):
