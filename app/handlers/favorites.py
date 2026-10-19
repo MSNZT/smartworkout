@@ -26,7 +26,7 @@ def get_favorites(request):
 
     cursor_str = query.get("cursor")
     cursor = None
-    if cursor_str:
+    if cursor_str is not None:
         if not ObjectId.is_valid(cursor_str):
             return error_response(
                 {"code": "BAD_REQUEST", "message": "invalid cursor"},
