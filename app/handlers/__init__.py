@@ -1,2 +1,2 @@
 def register_routes():
-    from . import auth, exercises
+    from . import auth, exercises, sessions
