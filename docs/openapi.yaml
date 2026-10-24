@@ -1,0 +1,1435 @@
+openapi: 3.0.3
+info:
+  title: SmartWorkout API
+  version: 1.0.0
+  description: |
+    REST API фитнес-приложения SmartWorkout: каталог упражнений, программы тренировок,
+    избранное и тренировки с историей результатов.
+
+    **Авторизация.** Все эндпоинты, кроме `/auth/*`, требуют заголовок
+    `Authorization: Bearer <access_token>`. Токен доступа выдаёт `POST /auth/login`,
+    он действует 15 минут. Refresh-токен действует 30 дней и хранится в cookie
+    `refresh_token` (HttpOnly, путь `/auth`).
+
+    **Списки** отдаются страницами: `limit` — размер страницы от 1 до 100 (по умолчанию 20),
+    `cursor` — значение `next` из предыдущего ответа. На последней странице `next` равен `null`.
+
+    **Ошибки** возвращаются в виде `{"code": "...", "message": "..."}`. Если неверны
+    конкретные поля, в ответе есть список `errors`.
+
+    В каждом ответе есть заголовок `X-Request-Id` для поиска запроса в логах сервера.
+servers:
+  - url: http://localhost:8000
+    description: Локальный сервер
+externalDocs:
+  description: Репозиторий проекта на GitHub
+  url: https://github.com/MSNZT/smartworkout
+tags:
+  - name: Аутентификация
+    description: Регистрация, вход, обновление токена и выход
+  - name: Профиль
+    description: Данные текущего пользователя
+  - name: Упражнения
+    description: Каталог упражнений. Читать может любой пользователь, менять — только ADMIN
+  - name: Программы
+    description: Программы тренировок пользователей
+  - name: Избранное
+    description: Избранные программы текущего пользователя
+  - name: Тренировки
+    description: Тренировки по программам и история результатов
+security:
+  - BearerAuth: []
+
+paths:
+  /auth/register:
+    post:
+      tags: [Аутентификация]
+      summary: Зарегистрироваться
+      description: Создаёт пользователя с ролью `USER`. Вход не выполняет.
+      operationId: register
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RegisterRequest'
+      responses:
+        '201':
+          description: Пользователь создан
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RegisteredUser'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '409':
+          description: Email уже зарегистрирован
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              example:
+                code: DUPLICATE_EMAIL
+                message: email already exists
+
+  /auth/login:
+    post:
+      tags: [Аутентификация]
+      summary: Войти
+      description: Проверяет email и пароль. Выдаёт токен доступа на 15 минут и записывает refresh-токен на 30 дней в cookie.
+      operationId: login
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LoginRequest'
+      responses:
+        '200':
+          description: Вход выполнен
+          headers:
+            Set-Cookie:
+              $ref: '#/components/headers/SetRefreshCookie'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LoginResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          description: Неверный email или пароль
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              example:
+                code: INVALID_CREDENTIALS
+                message: invalid email or password
+
+  /auth/refresh:
+    post:
+      tags: [Аутентификация]
+      summary: Обновить токен
+      description: По refresh-токену из cookie выдаёт новый токен доступа и записывает в cookie новый refresh-токен. Тело не нужно.
+      operationId: refreshToken
+      security:
+        - RefreshCookie: []
+      responses:
+        '200':
+          description: Токены обновлены
+          headers:
+            Set-Cookie:
+              $ref: '#/components/headers/SetRefreshCookie'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TokenResponse'
+        '401':
+          description: Нет cookie, refresh-токен недействителен или истёк
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              examples:
+                noCookie:
+                  summary: Нет cookie
+                  value:
+                    code: UNAUTHORIZED
+                    message: refresh token is required
+                expired:
+                  summary: Refresh-токен истёк
+                  value:
+                    code: TOKEN_EXPIRED
+                    message: token expired
+
+  /auth/logout:
+    post:
+      tags: [Аутентификация]
+      summary: Выйти
+      description: Удаляет cookie с refresh-токеном. Токен доступа клиент удаляет у себя сам. Тело не нужно.
+      operationId: logout
+      security: []
+      responses:
+        '204':
+          description: Cookie удалена, тела нет
+          headers:
+            Set-Cookie:
+              description: Удаление cookie, например `refresh_token=""; Max-Age=0; Path=/auth`
+              schema:
+                type: string
+
+  /me:
+    get:
+      tags: [Профиль]
+      summary: Получить профиль
+      description: Возвращает профиль текущего пользователя.
+      operationId: getProfile
+      responses:
+        '200':
+          description: Профиль пользователя
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserProfile'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /exercises:
+    get:
+      tags: [Упражнения]
+      summary: Получить список упражнений
+      description: |
+        Возвращает страницу упражнений в порядке добавления в каталог.
+        Внутри одного фильтра подходит любое из значений, разные фильтры выполняются одновременно.
+        Регистр значений фильтров не важен.
+      operationId: listExercises
+      parameters:
+        - name: muscle_group
+          in: query
+          description: Группы мышц через запятую, например `CHEST,ARMS`
+          required: false
+          style: form
+          explode: false
+          schema:
+            type: array
+            items:
+              $ref: '#/components/schemas/MuscleGroup'
+        - name: equipment
+          in: query
+          description: Инвентарь через запятую, например `DUMBBELL,BODYWEIGHT`
+          required: false
+          style: form
+          explode: false
+          schema:
+            type: array
+            items:
+              $ref: '#/components/schemas/Equipment'
+        - name: search
+          in: query
+          description: Подстрока в названии или описании, без учёта регистра
+          required: false
+          schema:
+            type: string
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/Limit'
+      responses:
+        '200':
+          description: Страница упражнений
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ExercisePage'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+    post:
+      tags: [Упражнения]
+      summary: Создать упражнение
+      description: Только `ADMIN`. Поля, которых нет в схеме, не принимаются.
+      operationId: createExercise
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ExerciseCreateRequest'
+      responses:
+        '201':
+          description: Упражнение создано
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Exercise'
+              example:
+                id: 6ad317149f3c1a7e524b1d35
+                name: Plank
+                description: Упор на предплечьях, тело в одну линию
+                muscle_groups: [CORE]
+                equipment: [BODYWEIGHT]
+                video_url: https://video.example.com/plank
+                created_at: '2026-10-17T06:35:00.000+00:00'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  /exercises/{exercise_id}:
+    parameters:
+      - $ref: '#/components/parameters/ExerciseId'
+    get:
+      tags: [Упражнения]
+      summary: Получить упражнение
+      operationId: getExercise
+      responses:
+        '200':
+          description: Упражнение
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Exercise'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    patch:
+      tags: [Упражнения]
+      summary: Изменить упражнение
+      description: Только `ADMIN`. Меняет только переданные поля, остальные остаются прежними; `null` не допускается.
+      operationId: updateExercise
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ExerciseUpdateRequest'
+      responses:
+        '200':
+          description: Упражнение после изменения
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Exercise'
+              example:
+                id: 6ad317149f3c1a7e524b1d35
+                name: Plank
+                description: Упор на предплечьях, держать 30–60 секунд
+                muscle_groups: [CORE]
+                equipment: [BODYWEIGHT]
+                video_url: https://video.example.com/plank
+                created_at: '2026-10-17T06:35:00.000+00:00'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    delete:
+      tags: [Упражнения]
+      summary: Удалить упражнение
+      description: Только `ADMIN`. Упражнение, которое входит хотя бы в одну программу, не удаляется.
+      operationId: deleteExercise
+      responses:
+        '204':
+          description: Упражнение удалено, тела нет
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: Упражнение используется в программах
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              example:
+                code: CONFLICT
+                message: Exercise is used in one or more programs
+
+  /programs:
+    get:
+      tags: [Программы]
+      summary: Получить публичные программы
+      description: Возвращает страницу публичных программ всех пользователей в порядке создания.
+      operationId: listPublicPrograms
+      parameters:
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/Limit'
+      responses:
+        '200':
+          description: Страница программ
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProgramPage'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+    post:
+      tags: [Программы]
+      summary: Создать программу
+      description: Автором становится текущий пользователь. Сервер добавляет к упражнениям их названия из каталога (`exercise_name`).
+      operationId: createProgram
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ProgramCreateRequest'
+      responses:
+        '201':
+          description: Программа создана
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Program'
+        '400':
+          description: Ошибка в полях или упражнения нет в каталоге
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              example:
+                code: BAD_REQUEST
+                message: Validation failed
+                errors:
+                  - field: exercises.0.exercise_id
+                    message: Exercise not found
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /programs/{program_id}:
+    parameters:
+      - $ref: '#/components/parameters/ProgramId'
+    get:
+      tags: [Программы]
+      summary: Получить программу
+      description: Программа доступна, если она публичная или текущий пользователь — её автор. Чужая приватная программа возвращает 404.
+      operationId: getProgram
+      responses:
+        '200':
+          description: Программа
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Program'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    patch:
+      tags: [Программы]
+      summary: Изменить программу
+      description: Только автор. Меняет только переданные поля, список `exercises` заменяется целиком. Поле `is_public` менять нельзя.
+      operationId: updateProgram
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ProgramUpdateRequest'
+      responses:
+        '200':
+          description: Программа после изменения
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Program'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    delete:
+      tags: [Программы]
+      summary: Удалить программу
+      description: Только автор. Программа удаляется и из избранного всех пользователей. Тренировки, проведённые по ней, остаются в истории.
+      operationId: deleteProgram
+      responses:
+        '204':
+          description: Программа удалена, тела нет
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /me/programs:
+    get:
+      tags: [Программы]
+      summary: Получить свои программы
+      description: Возвращает программы текущего пользователя, публичные и приватные, в порядке создания.
+      operationId: listMyPrograms
+      parameters:
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/Limit'
+      responses:
+        '200':
+          description: Страница программ
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProgramPage'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /me/favorites:
+    get:
+      tags: [Избранное]
+      summary: Получить избранное
+      description: Возвращает страницу кратких карточек избранных программ, сначала программы, созданные позже.
+      operationId: listFavorites
+      parameters:
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/Limit'
+      responses:
+        '200':
+          description: Страница кратких карточек программ
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProgramShortPage'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+    post:
+      tags: [Избранное]
+      summary: Добавить программу в избранное
+      description: Добавить можно только чужую публичную программу.
+      operationId: addFavorite
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/FavoriteRequest'
+      responses:
+        '201':
+          description: Программа добавлена в избранное
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StatusResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          description: Это своя программа
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              example:
+                code: FORBIDDEN
+                message: forbidden
+        '404':
+          description: Программы нет или она приватная
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              example:
+                code: NOT_FOUND
+                message: program not found
+        '409':
+          description: Программа уже в избранном
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              example:
+                code: CONFLICT
+                message: program already in favorites
+
+  /me/favorites/{program_id}:
+    parameters:
+      - $ref: '#/components/parameters/ProgramId'
+    delete:
+      tags: [Избранное]
+      summary: Убрать программу из избранного
+      operationId: removeFavorite
+      responses:
+        '204':
+          description: Программа убрана из избранного, тела нет
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          description: Программы нет в избранном
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              example:
+                code: NOT_FOUND
+                message: program not found in favorites
+
+  /me/sessions:
+    get:
+      tags: [Тренировки]
+      summary: Получить историю тренировок
+      description: Возвращает страницу кратких записей о тренировках текущего пользователя, сначала новые.
+      operationId: listSessions
+      parameters:
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/Limit'
+      responses:
+        '200':
+          description: Страница кратких записей о тренировках
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SessionShortPage'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+    post:
+      tags: [Тренировки]
+      summary: Начать тренировку
+      description: |
+        Создаёт тренировку по своей или публичной программе. Упражнения программы копируются в тренировку:
+        изменения в тренировке не затрагивают программу, а последующие изменения программы — начатую тренировку.
+      operationId: startSession
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/StartSessionRequest'
+      responses:
+        '201':
+          description: Тренировка начата, статус `in_progress`
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Session'
+              example:
+                id: 6adc3b509f3c1a7e524b1d66
+                user_id: 6adc36a09f3c1a7e524b1d58
+                source_program_id: 6adc3a249f3c1a7e524b1d5f
+                source_program_title: Утро дома
+                status: in_progress
+                started_at: '2026-10-24T05:00:00.000+00:00'
+                finished_at: null
+                duration_sec: null
+                exercises:
+                  - exercise_id: 6ad315e89f3c1a7e524b1d27
+                    exercise_name: Push-up
+                    order: 1
+                    planned_sets: 3
+                    planned_reps: 12
+                    rest_sec: 60
+                    completed_sets: 0
+                    actual_reps: []
+                    is_completed: false
+                    is_skipped: false
+                  - exercise_id: 6ad316609f3c1a7e524b1d2e
+                    exercise_name: Bodyweight squat
+                    order: 2
+                    planned_sets: 3
+                    planned_reps: 15
+                    rest_sec: 60
+                    completed_sets: 0
+                    actual_reps: []
+                    is_completed: false
+                    is_skipped: false
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /me/sessions/{session_id}:
+    parameters:
+      - $ref: '#/components/parameters/SessionId'
+    get:
+      tags: [Тренировки]
+      summary: Получить тренировку
+      operationId: getSession
+      responses:
+        '200':
+          description: Тренировка с результатами по упражнениям
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Session'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    patch:
+      tags: [Тренировки]
+      summary: Сохранить результат тренировки
+      description: |
+        Во время тренировки сохраняет прогресс, в конце завершает её. Нужно передать хотя бы одно поле.
+        `status: finished` завершает тренировку: сервер записывает `finished_at` и считает `duration_sec`.
+        В `exercises` можно менять порядок, план подходов и повторений и отдых, но не состав упражнений.
+      operationId: updateSession
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SessionUpdateRequest'
+      responses:
+        '200':
+          description: Тренировка после изменения
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Session'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: Тренировка уже завершена
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              example:
+                code: CONFLICT
+                message: session already finished
+    delete:
+      tags: [Тренировки]
+      summary: Удалить тренировку
+      description: Удаляет тренировку из истории, например начатую по ошибке.
+      operationId: deleteSession
+      responses:
+        '204':
+          description: Тренировка удалена, тела нет
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+components:
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: payload.signature
+      description: Токен доступа из `POST /auth/login` или `POST /auth/refresh`. Собственный формат, подпись HMAC-SHA256.
+    RefreshCookie:
+      type: apiKey
+      in: cookie
+      name: refresh_token
+      description: Refresh-токен, который сервер записывает в cookie при входе
+
+  headers:
+    SetRefreshCookie:
+      description: Refresh-токен, например `refresh_token=<токен>; HttpOnly; Max-Age=2592000; Path=/auth; SameSite=Strict`
+      schema:
+        type: string
+
+  parameters:
+    Cursor:
+      name: cursor
+      in: query
+      description: Курсор следующей страницы — значение `next` из предыдущего ответа
+      required: false
+      schema:
+        type: string
+        pattern: '^[a-fA-F0-9]{24}$'
+    Limit:
+      name: limit
+      in: query
+      description: Размер страницы
+      required: false
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 100
+        default: 20
+    ExerciseId:
+      name: exercise_id
+      in: path
+      description: id упражнения
+      required: true
+      schema:
+        $ref: '#/components/schemas/ObjectId'
+    ProgramId:
+      name: program_id
+      in: path
+      description: id программы
+      required: true
+      schema:
+        $ref: '#/components/schemas/ObjectId'
+    SessionId:
+      name: session_id
+      in: path
+      description: id тренировки
+      required: true
+      schema:
+        $ref: '#/components/schemas/ObjectId'
+
+  responses:
+    BadRequest:
+      description: Ошибка в данных запроса
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example:
+            code: BAD_REQUEST
+            message: Validation failed
+            errors:
+              - field: password
+                message: password must be at least 6 characters long
+    Unauthorized:
+      description: Нет токена или он недействителен
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example:
+            code: UNAUTHORIZED
+            message: authorization required
+    Forbidden:
+      description: Нет прав на действие
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example:
+            code: FORBIDDEN
+            message: access denied
+    NotFound:
+      description: Объекта нет или он недоступен текущему пользователю
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example:
+            code: NOT_FOUND
+            message: resource not found
+
+  schemas:
+    ObjectId:
+      type: string
+      pattern: '^[a-fA-F0-9]{24}$'
+      example: 6adc3a249f3c1a7e524b1d5f
+
+    ErrorResponse:
+      type: object
+      required: [code, message]
+      properties:
+        code:
+          type: string
+          description: Машинный код ошибки
+          example: NOT_FOUND
+        message:
+          type: string
+          description: Описание ошибки
+          example: resource not found
+        errors:
+          type: array
+          description: Ошибки в конкретных полях, если они есть
+          items:
+            $ref: '#/components/schemas/FieldError'
+    FieldError:
+      type: object
+      required: [field, message]
+      properties:
+        field:
+          type: string
+          example: password
+        message:
+          type: string
+          example: password must be at least 6 characters long
+
+    UserRole:
+      type: string
+      enum: [USER, ADMIN]
+    MuscleGroup:
+      type: string
+      enum: [CHEST, BACK, LEGS, ARMS, SHOULDERS, CORE, FULL_BODY]
+    Equipment:
+      type: string
+      enum: [BARBELL, DUMBBELL, MACHINE, BODYWEIGHT, KETTLEBELL, RESISTANCE_BAND, OTHER]
+    Difficulty:
+      type: string
+      enum: [Beginner, Intermediate, Advanced]
+    SessionStatus:
+      type: string
+      enum: [in_progress, finished]
+
+    RegisterRequest:
+      type: object
+      required: [email, password]
+      additionalProperties: false
+      properties:
+        email:
+          type: string
+          format: email
+          description: Сохраняется в нижнем регистре
+          example: anna@example.com
+        password:
+          type: string
+          format: password
+          minLength: 6
+          maxLength: 32
+          example: strongpass1
+    RegisteredUser:
+      type: object
+      required: [id, email, created_at]
+      properties:
+        id:
+          type: string
+          pattern: '^[a-fA-F0-9]{24}$'
+          example: 6adc36a09f3c1a7e524b1d58
+        email:
+          type: string
+          format: email
+          example: anna@example.com
+        created_at:
+          type: string
+          format: date-time
+          example: '2026-10-24T04:40:00.512+00:00'
+    LoginRequest:
+      type: object
+      required: [email, password]
+      additionalProperties: false
+      properties:
+        email:
+          type: string
+          format: email
+          example: anna@example.com
+        password:
+          type: string
+          format: password
+          example: strongpass1
+    LoginResponse:
+      type: object
+      required: [access_token, user]
+      properties:
+        access_token:
+          type: string
+          description: Токен доступа на 15 минут
+          example: eyJzdWIiOiI2YWRjMzZhMDlmM2MxYTdlNTI0YjFkNTgiLCJlbWFpbCI6ImFubmFAZXhhbXBsZS5jb20iLCJyb2xlIjoiVVNFUiIsInR5cGUiOiJhY2Nlc3MiLCJleHAiOjE3OTI4MTc3NjB9.V4tTATEVDxsugjcJYLHYDsRUKH6DAORpBRdQ7vjm1dU
+        user:
+          type: object
+          required: [id, email]
+          properties:
+            id:
+              type: string
+              pattern: '^[a-fA-F0-9]{24}$'
+              example: 6adc36a09f3c1a7e524b1d58
+            email:
+              type: string
+              format: email
+              example: anna@example.com
+    TokenResponse:
+      type: object
+      required: [access_token]
+      properties:
+        access_token:
+          type: string
+          description: Новый токен доступа на 15 минут
+          example: eyJzdWIiOiI2YWRjMzZhMDlmM2MxYTdlNTI0YjFkNTgiLCJlbWFpbCI6ImFubmFAZXhhbXBsZS5jb20iLCJyb2xlIjoiVVNFUiIsInR5cGUiOiJhY2Nlc3MiLCJleHAiOjE3OTI4MTg2NjB9.MyxdwElSF53VINK6pHDrwR2O4Zz0o3jINPB80meb8lE
+    UserProfile:
+      type: object
+      required: [id, email, role, created_at]
+      properties:
+        id:
+          type: string
+          pattern: '^[a-fA-F0-9]{24}$'
+          example: 6adc36a09f3c1a7e524b1d58
+        email:
+          type: string
+          format: email
+          example: anna@example.com
+        role:
+          $ref: '#/components/schemas/UserRole'
+        created_at:
+          type: string
+          format: date-time
+          example: '2026-10-24T04:40:00.512+00:00'
+
+    Exercise:
+      type: object
+      required: [id, name, muscle_groups, equipment, created_at]
+      description: Необязательные поля, которые не заданы, в ответ не попадают.
+      properties:
+        id:
+          type: string
+          pattern: '^[a-fA-F0-9]{24}$'
+          example: 6ad315e89f3c1a7e524b1d27
+        name:
+          type: string
+          example: Push-up
+        description:
+          type: string
+          example: Отжимания от пола, корпус держать прямым
+        muscle_groups:
+          type: array
+          items:
+            $ref: '#/components/schemas/MuscleGroup'
+          example: [CHEST, ARMS]
+        equipment:
+          type: array
+          items:
+            $ref: '#/components/schemas/Equipment'
+          example: [BODYWEIGHT]
+        video_url:
+          type: string
+          format: uri
+          example: https://video.example.com/push-up
+        image_url:
+          type: string
+          format: uri
+          example: https://cdn.example.com/exercises/push-up.png
+        created_at:
+          type: string
+          format: date-time
+          example: '2026-10-17T06:30:00.000+00:00'
+    ExerciseCreateRequest:
+      type: object
+      required: [name, muscle_groups, equipment]
+      additionalProperties: false
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 100
+          example: Plank
+        description:
+          type: string
+          maxLength: 500
+          example: Упор на предплечьях, тело в одну линию
+        muscle_groups:
+          type: array
+          minItems: 1
+          items:
+            $ref: '#/components/schemas/MuscleGroup'
+          example: [CORE]
+        equipment:
+          type: array
+          minItems: 1
+          items:
+            $ref: '#/components/schemas/Equipment'
+          example: [BODYWEIGHT]
+        video_url:
+          type: string
+          format: uri
+          example: https://video.example.com/plank
+        image_url:
+          type: string
+          format: uri
+    ExerciseUpdateRequest:
+      type: object
+      additionalProperties: false
+      description: Все поля необязательные, передаются только изменяемые.
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 100
+        description:
+          type: string
+          maxLength: 500
+          example: Упор на предплечьях, держать 30–60 секунд
+        muscle_groups:
+          type: array
+          minItems: 1
+          items:
+            $ref: '#/components/schemas/MuscleGroup'
+        equipment:
+          type: array
+          minItems: 1
+          items:
+            $ref: '#/components/schemas/Equipment'
+        video_url:
+          type: string
+          format: uri
+        image_url:
+          type: string
+          format: uri
+    ExercisePage:
+      type: object
+      required: [data, next, has_more]
+      properties:
+        data:
+          type: array
+          items:
+            $ref: '#/components/schemas/Exercise'
+        next:
+          type: string
+          nullable: true
+          description: Курсор следующей страницы, `null` на последней странице
+          example: 6ad315e89f3c1a7e524b1d27
+        has_more:
+          type: boolean
+          example: true
+
+    ProgramExerciseInput:
+      type: object
+      required: [exercise_id, order, sets, reps, rest_sec]
+      additionalProperties: false
+      properties:
+        exercise_id:
+          type: string
+          pattern: '^[a-fA-F0-9]{24}$'
+          example: 6ad315e89f3c1a7e524b1d27
+        order:
+          type: integer
+          minimum: 1
+          example: 1
+        sets:
+          type: integer
+          minimum: 1
+          example: 3
+        reps:
+          type: integer
+          minimum: 1
+          example: 12
+        rest_sec:
+          type: integer
+          minimum: 0
+          example: 60
+    ProgramExercise:
+      type: object
+      required: [exercise_id, exercise_name, order, sets, reps, rest_sec]
+      properties:
+        exercise_id:
+          type: string
+          pattern: '^[a-fA-F0-9]{24}$'
+          example: 6ad315e89f3c1a7e524b1d27
+        exercise_name:
+          type: string
+          description: Название упражнения на момент добавления в программу
+          example: Push-up
+        order:
+          type: integer
+          minimum: 1
+          example: 1
+        sets:
+          type: integer
+          minimum: 1
+          example: 3
+        reps:
+          type: integer
+          minimum: 1
+          example: 12
+        rest_sec:
+          type: integer
+          minimum: 0
+          example: 60
+    Program:
+      type: object
+      required: [id, title, description, is_public, difficulty, author_id, exercises, created_at, updated_at]
+      properties:
+        id:
+          type: string
+          pattern: '^[a-fA-F0-9]{24}$'
+          example: 6adc3a249f3c1a7e524b1d5f
+        title:
+          type: string
+          example: Утро дома
+        description:
+          type: string
+          description: Может быть пустой строкой
+          example: Короткая тренировка перед работой
+        is_public:
+          type: boolean
+          example: false
+        difficulty:
+          $ref: '#/components/schemas/Difficulty'
+        author_id:
+          type: string
+          pattern: '^[a-fA-F0-9]{24}$'
+          example: 6adc36a09f3c1a7e524b1d58
+        exercises:
+          type: array
+          items:
+            $ref: '#/components/schemas/ProgramExercise'
+        created_at:
+          type: string
+          format: date-time
+          example: '2026-10-24T04:55:00.000+00:00'
+        updated_at:
+          type: string
+          format: date-time
+          example: '2026-10-24T04:55:00.000+00:00'
+    ProgramCreateRequest:
+      type: object
+      required: [title, is_public, difficulty, exercises]
+      additionalProperties: false
+      properties:
+        title:
+          type: string
+          minLength: 3
+          maxLength: 200
+          example: Утро дома
+        description:
+          type: string
+          maxLength: 2000
+          example: Короткая тренировка перед работой
+        is_public:
+          type: boolean
+          description: Видна ли программа другим пользователям. Задаётся только при создании
+          example: false
+        difficulty:
+          $ref: '#/components/schemas/Difficulty'
+        exercises:
+          type: array
+          minItems: 1
+          items:
+            $ref: '#/components/schemas/ProgramExerciseInput'
+    ProgramUpdateRequest:
+      type: object
+      additionalProperties: false
+      description: Все поля необязательные. Поле `is_public` не принимается.
+      properties:
+        title:
+          type: string
+          minLength: 3
+          maxLength: 200
+          example: 'Утро дома: 20 минут'
+        description:
+          type: string
+          maxLength: 2000
+        difficulty:
+          $ref: '#/components/schemas/Difficulty'
+        exercises:
+          type: array
+          minItems: 1
+          description: Заменяет список упражнений целиком
+          items:
+            $ref: '#/components/schemas/ProgramExerciseInput'
+    ProgramShort:
+      type: object
+      required: [id, title, description, author_id, is_public, difficulty]
+      properties:
+        id:
+          type: string
+          pattern: '^[a-fA-F0-9]{24}$'
+          example: 6ad88e4c9f3c1a7e524b1d43
+        title:
+          type: string
+          example: Full body для начинающих
+        description:
+          type: string
+          example: Базовая программа на всё тело без инвентаря
+        author_id:
+          type: string
+          pattern: '^[a-fA-F0-9]{24}$'
+          example: 6ad723049f3c1a7e524b1d3c
+        is_public:
+          type: boolean
+          example: true
+        difficulty:
+          $ref: '#/components/schemas/Difficulty'
+    ProgramPage:
+      type: object
+      required: [data, next, has_more]
+      properties:
+        data:
+          type: array
+          items:
+            $ref: '#/components/schemas/Program'
+        next:
+          type: string
+          nullable: true
+          description: Курсор следующей страницы, `null` на последней странице
+          example: null
+        has_more:
+          type: boolean
+          example: false
+    ProgramShortPage:
+      type: object
+      required: [data, next, has_more]
+      properties:
+        data:
+          type: array
+          items:
+            $ref: '#/components/schemas/ProgramShort'
+        next:
+          type: string
+          nullable: true
+          description: Курсор следующей страницы, `null` на последней странице
+          example: null
+        has_more:
+          type: boolean
+          example: false
+    FavoriteRequest:
+      type: object
+      required: [program_id]
+      additionalProperties: false
+      properties:
+        program_id:
+          type: string
+          pattern: '^[a-fA-F0-9]{24}$'
+          example: 6ad88e4c9f3c1a7e524b1d43
+    StatusResponse:
+      type: object
+      required: [status]
+      properties:
+        status:
+          type: string
+          example: success
+
+    StartSessionRequest:
+      type: object
+      required: [program_id]
+      additionalProperties: false
+      properties:
+        program_id:
+          type: string
+          pattern: '^[a-fA-F0-9]{24}$'
+          example: 6adc3a249f3c1a7e524b1d5f
+    SessionExercise:
+      type: object
+      required: [exercise_id, exercise_name, order, planned_sets, planned_reps, rest_sec, completed_sets, actual_reps, is_completed, is_skipped]
+      properties:
+        exercise_id:
+          type: string
+          pattern: '^[a-fA-F0-9]{24}$'
+          example: 6ad315e89f3c1a7e524b1d27
+        exercise_name:
+          type: string
+          example: Push-up
+        order:
+          type: integer
+          minimum: 1
+          example: 1
+        planned_sets:
+          type: integer
+          minimum: 1
+          example: 3
+        planned_reps:
+          type: integer
+          minimum: 1
+          example: 12
+        rest_sec:
+          type: integer
+          minimum: 0
+          example: 60
+        completed_sets:
+          type: integer
+          minimum: 0
+          example: 3
+        actual_reps:
+          type: array
+          description: Фактические повторения, по одному числу на каждый выполненный подход
+          items:
+            type: integer
+            minimum: 0
+          example: [12, 12, 10]
+        is_completed:
+          type: boolean
+          example: true
+        is_skipped:
+          type: boolean
+          example: false
+    Session:
+      type: object
+      required: [id, user_id, source_program_id, source_program_title, status, started_at, finished_at, duration_sec, exercises]
+      properties:
+        id:
+          type: string
+          pattern: '^[a-fA-F0-9]{24}$'
+          example: 6adc3b509f3c1a7e524b1d66
+        user_id:
+          type: string
+          pattern: '^[a-fA-F0-9]{24}$'
+          example: 6adc36a09f3c1a7e524b1d58
+        source_program_id:
+          type: string
+          pattern: '^[a-fA-F0-9]{24}$'
+          example: 6adc3a249f3c1a7e524b1d5f
+        source_program_title:
+          type: string
+          description: Название программы на момент начала тренировки
+          example: Утро дома
+        status:
+          $ref: '#/components/schemas/SessionStatus'
+        started_at:
+          type: string
+          format: date-time
+          example: '2026-10-24T05:00:00.000+00:00'
+        finished_at:
+          type: string
+          format: date-time
+          nullable: true
+          description: '`null`, пока тренировка идёт'
+          example: '2026-10-24T05:25:20.000+00:00'
+        duration_sec:
+          type: integer
+          minimum: 0
+          nullable: true
+          description: Длительность в секундах, `null`, пока тренировка идёт
+          example: 1520
+        exercises:
+          type: array
+          items:
+            $ref: '#/components/schemas/SessionExercise'
+    SessionShort:
+      type: object
+      required: [id, source_program_id, source_program_title, status, started_at, finished_at, duration_sec]
+      properties:
+        id:
+          type: string
+          pattern: '^[a-fA-F0-9]{24}$'
+          example: 6adc3b509f3c1a7e524b1d66
+        source_program_id:
+          type: string
+          pattern: '^[a-fA-F0-9]{24}$'
+          example: 6adc3a249f3c1a7e524b1d5f
+        source_program_title:
+          type: string
+          example: Утро дома
+        status:
+          $ref: '#/components/schemas/SessionStatus'
+        started_at:
+          type: string
+          format: date-time
+          example: '2026-10-24T05:00:00.000+00:00'
+        finished_at:
+          type: string
+          format: date-time
+          nullable: true
+          example: '2026-10-24T05:25:20.000+00:00'
+        duration_sec:
+          type: integer
+          minimum: 0
+          nullable: true
+          example: 1520
+    SessionShortPage:
+      type: object
+      required: [data, next, has_more]
+      properties:
+        data:
+          type: array
+          items:
+            $ref: '#/components/schemas/SessionShort'
+        next:
+          type: string
+          nullable: true
+          description: Курсор следующей страницы, `null` на последней странице
+          example: null
+        has_more:
+          type: boolean
+          example: false
+    SessionUpdateRequest:
+      type: object
+      minProperties: 1
+      additionalProperties: false
+      properties:
+        exercises:
+          type: array
+          minItems: 1
+          description: Все упражнения тренировки с текущими результатами, заменяют прежний список
+          items:
+            $ref: '#/components/schemas/SessionExercise'
+        status:
+          type: string
+          enum: [finished]
+          description: '`finished` завершает тренировку'
