@@ -6,18 +6,19 @@
 
 ## Описание эндпоинтов
 
-Все эндпоинты RESTful-сервера описаны в Swagger: запросы, параметры, примеры ответов и коды ошибок.
+Все эндпоинты RESTful-сервера описаны в Swagger: запросы, параметры, схемы ответов и коды ошибок.
 
 **[SmartWorkout API в Swagger](https://app.swaggerhub.com/apis-docs/osjd/SmartWorkout/1.0.0)**
 
 Ресурсы API:
 
-- `/auth` — регистрация, вход и выход;
-- `/me/profiles` — профиль текущего пользователя;
+- `/auth` — регистрация, вход, обновление токена и выход;
 - `/exercises` — каталог упражнений, менять его может только администратор;
 - `/programs`, `/me/programs` — программы тренировок: публичные и свои;
 - `/me/favorites` — избранные программы;
 - `/sessions`, `/me/sessions` — тренировки по программам и их история.
+
+Ход тренировки (подходы, отдых, переход к следующему упражнению) ведёт клиентское приложение. Сервер сохраняет снимок программы при старте (`POST /sessions`) и итог тренировки при завершении (`POST /sessions/{session_id}/finish`).
 
 ## Запуск
 
@@ -26,5 +27,6 @@ cp .env.example .env              # настройки MongoDB и секрет �
 pip install -r requirements.txt
 make start                        # MongoDB в Docker и сервер на http://localhost:8000
 make start-ui                     # то же и веб-интерфейс базы DbGate на http://localhost:3000
+make create-admin                 # администратор для правки каталога, нужна запущенная MongoDB
 pytest                            # тесты, нужна запущенная MongoDB (make db-up)
 ```
