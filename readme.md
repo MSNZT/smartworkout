@@ -6,9 +6,13 @@
 
 ## Описание эндпоинтов
 
-Все эндпоинты RESTful-сервера описаны в Swagger: запросы, параметры, схемы ответов и коды ошибок.
+Все эндпоинты RESTful-сервера описаны в спецификации OpenAPI 3.0: запросы, параметры, схемы и примеры ответов, коды ошибок.
 
-**[SmartWorkout API в Swagger](https://app.swaggerhub.com/apis-docs/osjd/SmartWorkout/1.0.0)**
+**[Открыть описание API в Swagger Editor](https://editor.swagger.io/?url=https://gist.githubusercontent.com/MSNZT/bf7e4f4f69d8aba805ff4af982e9141d/raw/)**
+
+Файл спецификации хранится в GitHub Gist: <https://gist.githubusercontent.com/MSNZT/bf7e4f4f69d8aba805ff4af982e9141d/raw/>. В ссылке нет хэша ревизии, поэтому после правок она не меняется и всегда отдаёт последнюю версию. Если ссылка на редактор не открылась, зайдите на [editor.swagger.io](https://editor.swagger.io/), выберите File → Import URL и вставьте ссылку на файл.
+
+Почему не SwaggerHub: он и похожие сервисы бесплатно дают только пробный период. После него описание остаётся доступно только для чтения и больше не обновляется, поэтому спецификация хранится в Gist, а открывается в бесплатном Swagger Editor.
 
 Ресурсы API:
 
