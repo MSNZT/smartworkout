@@ -1,6 +1,7 @@
 .env
 __pycache__
 venv/
+.venv/
 .idea/
 
 # Local setup and AI agent instructions
@@ -11,6 +12,7 @@ AGENTS.md
 CLAUDE.md
 .pytest_cache/
 
+.DS_Store
 
 requests.http
 project_all.txt
