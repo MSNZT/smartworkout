@@ -18,3 +18,4 @@ requests.http
 project_all.txt
 seed.py
 collect_files.py
+.ruff_cache
