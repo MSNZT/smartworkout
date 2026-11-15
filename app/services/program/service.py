@@ -45,7 +45,7 @@ class ProgramService:
             raise ProgramNotFoundError()
 
         if program["author_id"] != ObjectId(user_id):
-            raise ProgramAccessDeniedError("You don't have access to update this program")
+            raise ProgramNotFoundError()
 
         if "exercises" in data:
             self._validate_exercises(data["exercises"])
@@ -63,7 +63,7 @@ class ProgramService:
             raise ProgramNotFoundError()
 
         if program["author_id"] != ObjectId(user_id):
-            raise ProgramAccessDeniedError("You don't have access to delete this program")
+            raise ProgramNotFoundError()
 
         self.program_repo.delete(program_id)
 

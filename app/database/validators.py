@@ -145,16 +145,17 @@ VALIDATORS = {
                 "exercises": {
                     "bsonType": "array",
                     "minItems": 1,
+                    "maxItems": 100,
                     "items": {
                         "bsonType": "object",
                         "required": ["exercise_id", "exercise_name", "order", "sets", "reps", "rest_sec"],
                         "properties": {
                             "exercise_id": {"bsonType": "objectId"},
                             "exercise_name": {"bsonType": "string"},
-                            "order": {"bsonType": "int", "minimum": 1},
-                            "sets": {"bsonType": "int", "minimum": 1},
-                            "reps": {"bsonType": "int", "minimum": 1},
-                            "rest_sec": {"bsonType": "int", "minimum": 0}
+                            "order": {"bsonType": "int", "minimum": 1, "maximum": 1000},
+                            "sets": {"bsonType": "int", "minimum": 1, "maximum": 100},
+                            "reps": {"bsonType": "int", "minimum": 1, "maximum": 1000},
+                            "rest_sec": {"bsonType": "int", "minimum": 0, "maximum": 86400}
                         }
                     }
                 },
