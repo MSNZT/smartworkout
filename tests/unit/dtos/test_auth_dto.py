@@ -99,6 +99,23 @@ def test_login_requires_json_object(payload):
 
 
 def test_login_does_not_apply_registration_password_length_rules():
-    # Login validates credentials, not the registration length policy.
     dto = LoginDTO.from_dict({"email": EMAIL, "password": "x"})
     assert dto.password == "x"
+
+@pytest.mark.parametrize("dto_class", [RegisterDTO, LoginDTO])
+def test_email_max_length(dto_class):
+    payload = {
+        "email": "a" * 250 + "@example.com",
+        "password": PASSWORD,
+    }
+
+    assert_invalid(dto_class, payload, "email")
+
+@pytest.mark.parametrize("dto_class", [RegisterDTO, LoginDTO])
+def test_invalid_unicode_password(dto_class):
+    payload = {
+        "email": EMAIL,
+        "password": "abc\ud800def",
+    }
+
+    assert_invalid(dto_class, payload, "password")
