@@ -9,15 +9,22 @@ from app.security.token import verify
 
 
 def require_auth(request, next_handler):
-    header = request["headers"].get("Authorization", "")
+    header = next(
+        (
+            value
+            for name, value in request["headers"].items()
+            if name.lower() == "authorization"
+        ),
+        "",
+    )
 
-    if not header.startswith("Bearer "):
+    parts = header.split()
+
+    if len(parts) != 2 or parts[0].lower() != "bearer":
         raise AuthorizationRequiredError()
 
-    token = header.removeprefix("Bearer ").strip()
-
     try:
-        payload = verify(token, settings.token_secret)
+        payload = verify(parts[1], settings.token_secret)
     except (TokenExpiredError, TokenInvalidError):
         raise AuthorizationRequiredError() from None
 

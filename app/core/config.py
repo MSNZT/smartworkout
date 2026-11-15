@@ -75,3 +75,12 @@ settings = Settings(
     access_ttl_seconds=_req_int("ACCESS_TTL_SECONDS"),
     refresh_ttl_seconds=_req_int("REFRESH_TTL_SECONDS"),
 )
+
+if settings.access_ttl_seconds <= 0 or settings.refresh_ttl_seconds <= 0:
+    raise ValueError("Token TTL must be greater than zero")
+
+if settings.is_production() and (
+    len(settings.token_secret) < 32
+    or settings.token_secret == "change-secret-token"
+):
+    raise ValueError("Invalid TOKEN_SECRET for production")

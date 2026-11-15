@@ -52,17 +52,21 @@ def verify(
 ) -> dict:
     try:
         payload_b64, signature = token.split(".")
-    except (AttributeError, ValueError):
+        expected = _sign(payload_b64, secret)
+
+        valid = hmac.compare_digest(
+            signature.encode("ascii"),
+            expected.encode("ascii"),
+        )
+    except (AttributeError, ValueError, UnicodeError):
         raise TokenInvalidError() from None
 
-    expected = _sign(payload_b64, secret)
-
-    if not hmac.compare_digest(signature, expected):
+    if not valid:
         raise TokenInvalidError()
 
     try:
         data = json.loads(_b64decode(payload_b64))
-    except (ValueError, binascii.Error):
+    except (ValueError, binascii.Error, RecursionError):
         raise TokenInvalidError() from None
 
     if not isinstance(data, dict):
