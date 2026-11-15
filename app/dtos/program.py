@@ -19,23 +19,23 @@ class ProgramExerciseDTO(BaseDTO):
         return None
 
     def _validate_order(self, value: int) -> str | None:
-        if value <= 0:
-            return "order must be greater than 0"
+        if value <= 0 or value > 1000:
+            return "order must be between 1 and 1000"
         return None
 
     def _validate_sets(self, value: int) -> str | None:
-        if value <= 0:
-            return "sets must be greater than 0"
+        if value <= 0 or value > 100:
+            return "sets must be between 1 and 100"
         return None
 
     def _validate_reps(self, value: int) -> str | None:
-        if value <= 0:
-            return "reps must be greater than 0"
+        if value <= 0 or value > 1000:
+            return "reps must be between 1 and 1000"
         return None
 
     def _validate_rest_sec(self, value: int) -> str | None:
-        if value < 0:
-            return "rest_sec cannot be negative"
+        if value < 0 or value > 86400:
+            return "rest_sec must be between 0 and 86400"
         return None
 
     def to_document(self) -> dict:
@@ -71,6 +71,8 @@ class ProgramCreateDTO(BaseDTO):
 
         if not self.exercises:
             raise DTOValidationError([{"field": "exercises", "message": "at least one exercise is required"}])
+        if len(self.exercises) > 100:
+            raise DTOValidationError([{"field": "exercises", "message": "must contain at most 100 items"}])
 
         validated = []
         errors = []
@@ -134,6 +136,11 @@ class ProgramUpdateDTO(BaseDTO):
         if self.exercises is not None:
             if not self.exercises:
                 raise DTOValidationError([{"field": "exercises", "message": "at least one exercise is required"}])
+
+            if len(self.exercises) > 100:
+                raise DTOValidationError([
+                    {"field": "exercises", "message": "must contain at most 100 items"}
+                ])
 
             validated = []
             errors = []

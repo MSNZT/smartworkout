@@ -70,7 +70,12 @@ class TestProgramsAPI:
 
         assert status == 400
         assert body['errors'][0]['field'] == 'exercises.0.sets'
-        assert body['errors'][0]['message'] == 'sets must be greater than 0'
+        assert body['errors'][0]['message'] == 'sets must be between 1 and 100'
+
+        payload = self.get_valid_payload()
+        payload['exercises'][0]['sets'] = 999999999999
+        status, body, _ = self.api.request('POST', '/programs', payload=payload, role='USER')
+        assert status == 400
 
     def test_patch_program_partial_update(self):
         """4. Частичное обновление (PATCH): меняем только title"""

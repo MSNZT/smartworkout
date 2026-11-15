@@ -43,7 +43,7 @@ class ProgramRepository:
             "created_at": now,
             "updated_at": now
         }
-
+        processed_exercises.sort(key=lambda x: x["order"])
         result = self.collection.insert_one(doc)
 
         doc["_id"] = result.inserted_id
@@ -110,6 +110,7 @@ class ProgramRepository:
                 "reps": ex["reps"],
                 "rest_sec": ex["rest_sec"]
             })
+        processed_exercises.sort(key=lambda x: x["order"])
         return processed_exercises
 
     def get_existing_exercise_ids(self, exercise_ids: list[ObjectId]) -> set[ObjectId]:
