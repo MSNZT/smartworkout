@@ -1,6 +1,6 @@
 from app.common.pagination import PaginationParams, Page, paginate
 from app.repositories.program import ProgramRepository
-from app.errors.program import ProgramNotFoundError, InvalidProgramIdError, ProgramAccessDeniedError
+from app.errors.program import ProgramNotFoundError, InvalidProgramIdError
 from app.dtos.utils import validate_object_id
 from app.dtos.base import DTOValidationError
 from bson import ObjectId
