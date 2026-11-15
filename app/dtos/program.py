@@ -137,6 +137,11 @@ class ProgramUpdateDTO(BaseDTO):
             if not self.exercises:
                 raise DTOValidationError([{"field": "exercises", "message": "at least one exercise is required"}])
 
+            if len(self.exercises) > 100:
+                raise DTOValidationError([
+                    {"field": "exercises", "message": "must contain at most 100 items"}
+                ])
+
             validated = []
             errors = []
             for idx, ex in enumerate(self.exercises):
